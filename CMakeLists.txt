@@ -7,7 +7,7 @@ cmake_policy(VERSION 3.21.3...3.30)
 if (NOT DEFINED FIDESLIB_ARCH)
     set(FIDESLIB_ARCH "80-real;86-real;89-real;90-real;90-virtual;100-real;120-real" CACHE STRING "Set the backend architecture target.")
 endif ()
-
+message(STATUS "Setting architecture '${FIDESLIB_ARCH}' for build.")
 # Set build type.
 set(DEFAULT_BUILD_TYPE "Release")
 if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -41,6 +41,11 @@ option(FIDESLIB_COMPILE_BENCHMARKS "Set ON to compile the FIDESlib benchmark sui
 # Option to compile the test suite.
 option(FIDESLIB_COMPILE_TESTS "Set ON to compile the FIDESlib test suite." ON)
 
+# Option to enable interprocedural optimization (LTO) on Release builds. This adds
+# meaningful link time across the CUDA arch list and is mainly useful when measuring
+# FIDESlib's own runtime performance; leave OFF for a dependency/dev-loop build.
+option(FIDESLIB_ENABLE_LTO "Set ON to enable IPO/LTO for Release builds." OFF)
+
 # Export compile commands for debugging.
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE INTERNAL "")
 
@@ -50,8 +55,16 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE INTERNAL "")
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS ON)
-set(CMAKE_C_COMPILER "gcc")
-set(CMAKE_CXX_COMPILER "g++")
+# Only force gcc/g++ when FIDESlib is the top-level project. Re-setting
+# CMAKE_CXX_COMPILER here when a parent project (e.g. FHE-BERT-Tiny, via
+# add_subdirectory) already enabled CXX makes CMake re-validate it as a bare,
+# non-full-path name and fail with "not a full path and was not found in the
+# PATH" even though the compiler is on PATH -- CMake's re-check for a language
+# already enabled by an ancestor scope is stricter than its first-time search.
+if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    set(CMAKE_C_COMPILER "gcc")
+    set(CMAKE_CXX_COMPILER "g++")
+endif ()
 
 ############### CUDA Configuration ###################
 
@@ -160,14 +173,18 @@ if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0")
     set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -O0 -Xcompiler -O0 -Xcompiler -g -G")
 elseif (CMAKE_BUILD_TYPE STREQUAL "Release")
-    include(CheckIPOSupported)
-    check_ipo_supported(RESULT supported OUTPUT error)
+    if (FIDESLIB_ENABLE_LTO)
+        include(CheckIPOSupported)
+        check_ipo_supported(RESULT supported OUTPUT error)
 
-    if (supported)
-        message(STATUS "IPO / LTO enabled")
-        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
+        if (supported)
+            message(STATUS "IPO / LTO enabled")
+            set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
+        else ()
+            message(STATUS "IPO / LTO not supported: <${error}>")
+        endif ()
     else ()
-        message(STATUS "IPO / LTO not supported: <${error}>")
+        message(STATUS "IPO / LTO disabled (pass -DFIDESLIB_ENABLE_LTO=ON to enable)")
     endif ()
     set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler -O3")
 elseif (CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")

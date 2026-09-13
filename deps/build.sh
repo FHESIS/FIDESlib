@@ -27,3 +27,11 @@ echo "Installing into $1"
 cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$1" ..
 make -j12
 make install -j12
+
+# Stamp the install with a hash of the patch just applied, so callers building
+# FIDESlib as a dependency (see FHE-BERT-Tiny/build_with_deps.sh) can detect
+# "already installed, matching patch" and skip re-running this from-scratch
+# OpenFHE rebuild.
+mkdir -p "$1/share/openfhe"
+sha256sum ../../fideslib-ref-1.5.1.1.patch | cut -d' ' -f1 > "$1/share/openfhe/.fideslib_openfhe_stamp"
+echo "Stamped OpenFHE install at $1 for patch $(cat "$1/share/openfhe/.fideslib_openfhe_stamp")"
